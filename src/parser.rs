@@ -1,4 +1,4 @@
-use crate::command::{Command, Redirection, RedirectionChannel, RedirectionKind};
+use crate::command::{Command, Redirection, OutputChannel, RedirectionKind};
 use crate::utils::expand_home_path;
 
 const REDIRECT_OPERATORS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
@@ -92,22 +92,22 @@ fn parse_redirection(redirection_tokens: &Vec<String>) -> Option<Redirection> {
     match redirection_tokens[0].as_str() {
         ">" | "1>" => Some(Redirection {
             kind: RedirectionKind::Redirect,
-            channel: RedirectionChannel::Stdout,
+            channel: OutputChannel::Stdout,
             file: redirection_tokens[1].clone(),
         }),
         "2>" => Some(Redirection {
             kind: RedirectionKind::Redirect,
-            channel: RedirectionChannel::Stderr,
+            channel: OutputChannel::Stderr,
             file: redirection_tokens[1].clone(),
         }),
         ">>" | "1>>" => Some(Redirection {
             kind: RedirectionKind::Append,
-            channel: RedirectionChannel::Stdout,
+            channel: OutputChannel::Stdout,
             file: redirection_tokens[1].clone(),
         }),
         "2>>" => Some(Redirection {
             kind: RedirectionKind::Append,
-            channel: RedirectionChannel::Stderr,
+            channel: OutputChannel::Stderr,
             file: redirection_tokens[1].clone(),
         }),
         _ => None,
@@ -292,7 +292,7 @@ mod tests {
         let input = vec![">".to_string(), "/tmp/foo/baz.md".to_string()];
         let expected = Some(Redirection {
             kind: RedirectionKind::Redirect,
-            channel: RedirectionChannel::Stdout,
+            channel: OutputChannel::Stdout,
             file: String::from("/tmp/foo/baz.md"),
         });
 
@@ -305,7 +305,7 @@ mod tests {
         let command_tokens = vec!["ls".to_string(), "/tmp/baz".to_string()];
         let redirection = Some(Redirection {
             kind: RedirectionKind::Redirect,
-            channel: RedirectionChannel::Stdout,
+            channel: OutputChannel::Stdout,
             file: String::from("/tmp/foo/baz.md"),
         });
         let expected = Command::External {
@@ -313,7 +313,7 @@ mod tests {
             args: vec!["/tmp/baz".to_string()],
             redirection: Some(Redirection {
                 kind: RedirectionKind::Redirect,
-                channel: RedirectionChannel::Stdout,
+                channel: OutputChannel::Stdout,
                 file: "/tmp/foo/baz.md".to_string(),
             }),
         };
@@ -402,7 +402,7 @@ mod tests {
             args: vec!["Hello World".to_string()],
             redirection: Some(Redirection {
                 kind: RedirectionKind::Redirect,
-                channel: RedirectionChannel::Stdout,
+                channel: OutputChannel::Stdout,
                 file: "/tmp/foo/bar.md".to_string(),
             }),
         };

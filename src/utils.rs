@@ -1,7 +1,7 @@
-use crate::command::{Redirection, RedirectionChannel, RedirectionKind};
-use std::fs::OpenOptions;
-use std::io::{Seek, SeekFrom, Write};
 use std::{env, fs};
+use std::fs::OpenOptions;
+use std::io::Write;
+use crate::command::{Redirection, RedirectionKind};
 
 pub fn expand_home_path(path: &str) -> String {
     if path.as_bytes().get(0) == Some(&b'~') {
@@ -17,40 +17,28 @@ pub fn expand_home_path(path: &str) -> String {
     }
 }
 
-/// This takes the output of a command, and an optional redirection Command, and a flag to indicate
-/// whether the main command was successful or not
-/// If there is a redirection operator and the success status of the command and the redirection operator match
-/// then the output message is sent to the file, else printed out
-/// If there is no redirection it simply prints to stdout
-pub fn write_output(output: &str, redirection: &Option<Redirection>, success: bool) {
-    if let Some(redirection) = redirection {
-        if redirection.kind == RedirectionKind::Redirect
-            || (redirection.kind == RedirectionKind::Append
-                && fs::metadata(&redirection.file).is_err())
-        {
-            fs::write(&redirection.file, String::new()).unwrap();
+pub fn write_or_append_to_file(message: &str, redirection: &Redirection) {
+    match redirection.kind {
+        RedirectionKind::Redirect => {
+            fs::write(&redirection.file, message).unwrap();
         }
+        RedirectionKind::Append => {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&redirection.file)
+                .unwrap();
 
-        if (success && redirection.channel == RedirectionChannel::Stdout)
-            || (!success && redirection.channel == RedirectionChannel::Stderr)
-        {
-            if redirection.kind == RedirectionKind::Redirect {
-                fs::write(&redirection.file, output).unwrap();
-            } else {
-                let mut file = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&redirection.file)
-                    .unwrap();
-
-                file.seek(SeekFrom::End(0)).unwrap();
-                file.write(output.as_bytes()).unwrap();
-            }
-            return;
-        } else {
-            print!("{}", output);
+            file.write_all(message.as_bytes()).unwrap();
         }
-    } else {
-        print!("{}", output);
+    }
+}
+
+pub fn ensure_file_exists_for_redirection(redirection: &Redirection) {
+    if redirection.kind == RedirectionKind::Redirect
+        || (redirection.kind == RedirectionKind::Append
+        && fs::metadata(&redirection.file).is_err())
+    {
+        fs::write(&redirection.file, String::new()).unwrap();
     }
 }

@@ -1,5 +1,4 @@
-use crate::utils::write_output;
-use std::fs::OpenOptions;
+use crate::utils::{ensure_file_exists_for_redirection, write_or_append_to_file};
 use std::io::Write;
 use std::process::exit;
 use std::{env, fs};
@@ -7,12 +6,12 @@ use std::{env, fs};
 #[derive(Debug, PartialEq, Eq)]
 pub struct Redirection {
     pub kind: RedirectionKind,
-    pub channel: RedirectionChannel,
+    pub channel: OutputChannel,
     pub file: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum RedirectionChannel {
+pub enum OutputChannel {
     Stdout,
     Stderr,
 }
@@ -69,7 +68,6 @@ impl Command {
                         if let Ok(entry) = entry {
                             if entry.file_name() == arg {
                                 return Ok(entry.path().display().to_string());
-                                // return Ok(entry.file_name().to_string_lossy().to_string());
                             }
                         }
                     }
@@ -84,6 +82,29 @@ impl Command {
     }
 }
 
+pub struct CommandOutput {
+    pub message: String,
+    pub channel: OutputChannel,
+}
+
+impl CommandOutput {
+    pub fn write(&self, redirection: &Option<Redirection>) {
+        if redirection.is_none() {
+            print!("{}", self.message);
+            return;
+        }
+
+        let redirection = redirection.as_ref().unwrap();
+        if self.channel == redirection.channel && !self.message.is_empty() {
+            write_or_append_to_file(&self.message, redirection);
+            return;
+        }
+
+        ensure_file_exists_for_redirection(redirection);
+        print!("{}", self.message);
+    }
+}
+
 pub trait Executable {
     fn execute(&self);
 }
@@ -92,7 +113,11 @@ impl Executable for Command {
     fn execute(&self) {
         match self {
             Command::Echo { args, redirection } => {
-                write_output(&format!("{}\n", args.join(" ")), redirection, true);
+                CommandOutput {
+                    message: format!("{}\n", args.join(" ")),
+                    channel: OutputChannel::Stdout,
+                }
+                .write(redirection);
             }
             Command::Exit { _arg: _ } => {
                 exit(0);
@@ -106,7 +131,11 @@ impl Executable for Command {
                     format!("{arg}: not found\n")
                 };
 
-                write_output(&output, redirection, true);
+                CommandOutput {
+                    message: output,
+                    channel: OutputChannel::Stdout,
+                }
+                .write(redirection);
             }
             Command::External {
                 name,
@@ -114,42 +143,40 @@ impl Executable for Command {
                 redirection,
             } => {
                 Command::arg_check_in_path(name)
-                    .map(|path| {
-                        // println!("name: {name}");
-                        // println!("path: {path}");
+                    .map(|_path| {
                         let output = std::process::Command::new(name)
                             .args(args.clone())
                             .output()
                             .unwrap();
 
                         if output.status.success() {
-                            write_output(
-                                &format!("{}", String::from_utf8_lossy(&output.stdout)),
-                                redirection,
-                                true,
-                            )
+                            CommandOutput {
+                                message: format!("{}", String::from_utf8_lossy(&output.stdout)),
+                                channel: OutputChannel::Stdout,
+                            }
+                            .write(redirection);
                         } else {
-                            write_output(
-                                &format!("{}", String::from_utf8_lossy(&output.stderr)),
-                                redirection,
-                                false,
-                            )
+                            CommandOutput {
+                                message: format!("{}", String::from_utf8_lossy(&output.stderr)),
+                                channel: OutputChannel::Stderr,
+                            }
+                            .write(redirection);
                         }
                     })
                     .unwrap_or_else(|_| {
-                        write_output(
-                            &format!("{}: command not found\n", name),
-                            redirection,
-                            false,
-                        )
+                        CommandOutput {
+                            message: format!("{}: command not found\n", name),
+                            channel: OutputChannel::Stderr,
+                        }
+                        .write(redirection);
                     });
             }
             Command::Pwd { redirection } => {
-                write_output(
-                    &format!("{}\n", env::current_dir().unwrap().display()),
-                    redirection,
-                    true,
-                );
+                CommandOutput {
+                    message: format!("{}\n", env::current_dir().unwrap().display()),
+                    channel: OutputChannel::Stdout,
+                }
+                .write(redirection);
             }
             Command::Cd { arg } => {
                 let result = env::set_current_dir(&arg);
@@ -168,65 +195,26 @@ impl Executable for Command {
                     }
                 }
 
-                if let Some(redirection) = redirection {
-                    if redirection.kind == RedirectionKind::Redirect
-                        || (redirection.kind == RedirectionKind::Append
-                            && fs::exists(&redirection.file).is_err())
-                    {
-                        fs::write(&redirection.file, String::new()).unwrap();
-                    }
-
-                    if !error.is_empty() && redirection.channel == RedirectionChannel::Stderr {
-                        if redirection.kind == RedirectionKind::Redirect {
-                            fs::write(&redirection.file, &error).unwrap();
-                        } else {
-                            let mut file = OpenOptions::new()
-                                .write(true)
-                                .append(true)
-                                .open(&redirection.file)
-                                .unwrap();
-
-                            file.write_all(error.as_bytes()).unwrap();
-                        }
-
-                        print!("{}", output);
-                    } else if !error.is_empty() && redirection.channel == RedirectionChannel::Stdout
-                    {
-                        if redirection.kind == RedirectionKind::Redirect {
-                            fs::write(&redirection.file, &output).unwrap();
-                        } else {
-                            let mut file = OpenOptions::new()
-                                .write(true)
-                                .append(true)
-                                .open(&redirection.file)
-                                .unwrap();
-
-                            file.write_all(output.as_bytes()).unwrap();
-                        }
-
-                        print!("{}", error);
-                    } else if error.is_empty() && redirection.channel == RedirectionChannel::Stdout
-                    {
-                        if redirection.kind == RedirectionKind::Redirect {
-                            fs::write(&redirection.file, &output).unwrap();
-                        } else {
-                            let mut file = OpenOptions::new()
-                                .write(true)
-                                .append(true)
-                                .open(&redirection.file)
-                                .unwrap();
-
-                            file.write_all(output.as_bytes()).unwrap();
-                        }
-                    } else {
-                        print!("{}", output);
-                    }
-                } else {
+                if redirection.is_none() {
                     if !error.is_empty() {
                         print!("{}", error);
                     } else {
                         print!("{}", output);
                     }
+                    return;
+                }
+
+                let redirection = redirection.as_ref().unwrap();
+
+                ensure_file_exists_for_redirection(redirection);
+                if !error.is_empty() && redirection.channel == OutputChannel::Stderr {
+                    write_or_append_to_file(&error, &redirection);
+                    print!("{}", output);
+                    return;
+                }
+                if !output.is_empty() && redirection.channel == OutputChannel::Stdout {
+                    write_or_append_to_file(&output, &redirection);
+                    print!("{}", error);
                 }
             }
         }
